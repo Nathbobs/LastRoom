@@ -66,6 +66,14 @@ export class Reservation {
   @Prop()
   externalId?: string;
 
+  /**
+   * The client's Idempotency-Key for POST /reservations (Layer C). Stored on the
+   * reservation itself so retries stay safe even when Redis is down. Never
+   * returned by the API.
+   */
+  @Prop()
+  idempotencyKey?: string;
+
   createdAt: Date;
 
   @Prop()
@@ -88,6 +96,17 @@ ReservationSchema.index(
   {
     unique: true,
     partialFilterExpression: { externalId: { $exists: true } },
+  },
+);
+
+// Layer C, the durable part: one reservation per Idempotency-Key. Two retries
+// racing with the same key can't both insert; the loser gets E11000 and returns
+// the winner's reservation. Partial so reservations without a key aren't indexed.
+ReservationSchema.index(
+  { idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $exists: true } },
   },
 );
 

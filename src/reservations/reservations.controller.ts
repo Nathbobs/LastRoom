@@ -8,6 +8,7 @@ import {
   Param,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
 import {
   ApiCreatedResponse,
@@ -17,6 +18,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { ApiErrors } from '../common/error-response.dto.js';
 import { ParseObjectIdPipe } from '../common/parse-object-id.pipe.js';
 import {
@@ -36,9 +38,11 @@ export class ReservationsController {
 
   @Post()
   @ApiOperation({
-    summary: 'Create a reservation (Phase 3: currently returns 501)',
+    summary: 'Create a reservation',
     description:
-      'Claims every night of [checkIn, checkOut) all-or-nothing; 409 ROOM_UNAVAILABLE if any night is full.',
+      'Claims every night of [checkIn, checkOut) all-or-nothing; 409 ROOM_UNAVAILABLE if any night is full. ' +
+      'With an Idempotency-Key, a retry returns the original reservation (header Idempotent-Replayed: true); ' +
+      'reusing a key for a different request is 409 INVALID_STATE.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -47,12 +51,18 @@ export class ReservationsController {
       'Retries with the same key return the original response instead of booking twice.',
   })
   @ApiCreatedResponse({ type: ReservationResponseDto })
-  @ApiErrors(400, 404, 409, 501)
-  create(
+  @ApiErrors(400, 404, 409)
+  async create(
     @Body() dto: CreateReservationDto,
+    @Res({ passthrough: true }) res: Response,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<ReservationResponseDto> {
-    return this.reservations.create(dto, idempotencyKey);
+    const { reservation, replayed } = await this.reservations.create(
+      dto,
+      idempotencyKey,
+    );
+    if (replayed) res.setHeader('Idempotent-Replayed', 'true');
+    return reservation;
   }
 
   @Get()
@@ -78,11 +88,10 @@ export class ReservationsController {
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary:
-      'Cancel a reservation and release its nights (Phase 3: currently returns 501)',
+    summary: 'Cancel a reservation and release its nights',
   })
   @ApiOkResponse({ type: ReservationResponseDto })
-  @ApiErrors(400, 404, 409, 501)
+  @ApiErrors(400, 404, 409)
   cancel(
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<ReservationResponseDto> {
