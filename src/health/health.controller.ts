@@ -1,16 +1,22 @@
 import { Controller, Get, HttpStatus, Res } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { Public } from '../common/api-key.guard.js';
 import { HealthReport, HealthService } from './health.service.js';
 
 /**
- * Not behind the API-key guard (added in Phase 2): Docker and CI healthchecks
- * must be able to call it without credentials.
+ * @Public: Docker and CI healthchecks must be able to call it without an API key.
  */
+@ApiTags('health')
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 
   @Get()
+  @ApiOperation({
+    summary: 'Mongo + Redis status: 200 ok/degraded, 503 when Mongo is down',
+  })
   async get(@Res({ passthrough: true }) res: Response): Promise<HealthReport> {
     const report = await this.health.check();
     // 503 only when Mongo is down. Redis down is "degraded" but still 200,
