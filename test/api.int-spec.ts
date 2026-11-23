@@ -438,39 +438,6 @@ describe('Phase 2 API (integration)', () => {
     });
   });
 
-  describe('Phase 3 stubs', () => {
-    const validBody = {
-      roomTypeId: new Types.ObjectId().toString(),
-      checkIn: '2026-12-24',
-      checkOut: '2026-12-26',
-      guest: { name: 'Ada', email: 'ada@example.com' },
-    };
-
-    it('POST /reservations validates the body, then returns 501 NOT_IMPLEMENTED', async () => {
-      const bad = await authed
-        .post('/reservations')
-        .send({ ...validBody, guest: { name: 'Ada', email: 'nope' } })
-        .expect(400);
-      const err = expectErrorShape(bad.body, 'VALIDATION_ERROR');
-      expect(err.details.fields).toEqual([
-        { field: 'guest.email', errors: ['email must be an email'] },
-      ]);
-
-      const res = await authed
-        .post('/reservations')
-        .send(validBody)
-        .expect(501);
-      expectErrorShape(res.body, 'NOT_IMPLEMENTED');
-    });
-
-    it('POST /reservations/:id/cancel returns 501 NOT_IMPLEMENTED', async () => {
-      const res = await authed
-        .post(`/reservations/${new Types.ObjectId().toString()}/cancel`)
-        .expect(501);
-      expectErrorShape(res.body, 'NOT_IMPLEMENTED');
-    });
-  });
-
   describe('Swagger', () => {
     it('/docs-json lists every Phase 2 endpoint and is public', async () => {
       const res = await api().get('/docs-json').expect(200);
