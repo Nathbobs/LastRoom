@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import type { ClientSession, Connection, Model } from 'mongoose';
 import { Types } from 'mongoose';
-import { InvalidStateException } from '../common/errors/app-exception.js';
+import {
+  InvalidStateException,
+  RoomUnavailableException,
+} from '../common/errors/app-exception.js';
 import { isDuplicateKeyError } from '../common/mongo-errors.js';
 import { Inventory } from './inventory.schema.js';
 
@@ -14,8 +17,8 @@ export interface NightInventory {
 }
 
 /**
- * Owns the per-night inventory rows. Phase 2: seeding, setting totals, reading.
- * The claim/release logic for bookings (Phase 3) is written by the owner.
+ * Owns the per-night inventory rows: seeding, setting totals, reading, and the
+ * booking claim/release (Phase 3, Layer A: the double-booking guarantee).
  */
 @Injectable()
 export class InventoryService {
@@ -97,6 +100,67 @@ export class InventoryService {
         throw err;
       }
     });
+  }
+
+  /**
+   * Layer A: claims one unit on EVERY night, or throws.
+   *
+   * Must run inside the caller's transaction. Each update is conditional: it
+   * only matches the row if booked < total AT WRITE TIME, so two requests can
+   * never both take the last unit (the second one's filter no longer matches,
+   * or MongoDB raises a WriteConflict and the transaction retries and then
+   * misses). If any night is full or has no row, we throw and the caller's
+   * transaction aborts, undoing the nights already claimed: no half-claimed stays.
+   *
+   * Nights are claimed in date order so concurrent multi-night stays touch rows
+   * in the same order.
+   */
+  async claim(
+    roomTypeId: Types.ObjectId,
+    nights: string[],
+    session: ClientSession,
+  ): Promise<void> {
+    for (const date of nights) {
+      const res = await this.inventory.updateOne(
+        { roomTypeId, date, $expr: { $lt: ['$booked', '$total'] } },
+        { $inc: { booked: 1 } },
+        { session },
+      );
+      if (res.matchedCount !== 1) {
+        throw new RoomUnavailableException(
+          `No units left on ${date} for this room type`,
+          { roomTypeId: roomTypeId.toString(), night: date },
+        );
+      }
+    }
+  }
+
+  /**
+   * Mirror of claim(): gives back one unit on every night, inside the caller's
+   * transaction. If a row is missing or already at 0 the inventory has drifted
+   * from the reservations; we refuse (transaction aborts) instead of silently
+   * releasing only some nights. Reconciliation (Phase 5) reports such drift.
+   */
+  async release(
+    roomTypeId: Types.ObjectId,
+    nights: string[],
+    session: ClientSession,
+  ): Promise<void> {
+    const res = await this.inventory.updateMany(
+      { roomTypeId, date: { $in: nights }, booked: { $gt: 0 } },
+      { $inc: { booked: -1 } },
+      { session },
+    );
+    if (res.modifiedCount !== nights.length) {
+      throw new InvalidStateException(
+        'Inventory does not match this reservation; nothing was released (run reconciliation)',
+        {
+          roomTypeId: roomTypeId.toString(),
+          nights: nights.length,
+          released: res.modifiedCount,
+        },
+      );
+    }
   }
 
   /** Every night in the range, in order. Nights with no row are not sellable: total 0. */
