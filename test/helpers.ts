@@ -101,3 +101,37 @@ export function tally(results: RaceResult[]): Record<string, number> {
   }
   return out;
 }
+
+/** Same defaults as vitest.config.int.ts / vitest.config.conc.ts. */
+export const CHANNEL_SECRETS: Record<string, string> = {
+  'channel-a': 'test-channel-a-secret-0123',
+  'channel-b': 'test-channel-b-secret-0123',
+};
+
+export function bookingEvent(
+  eventId: string,
+  roomTypeId: string,
+  overrides: Partial<{
+    externalId: string;
+    checkIn: string;
+    checkOut: string;
+    guest: { name: string; email: string };
+  }> = {},
+) {
+  return {
+    eventId,
+    type: 'booking.created',
+    data: {
+      externalId: 'CHA-1001',
+      roomTypeId,
+      checkIn: '2026-12-24',
+      checkOut: '2026-12-26',
+      guest: { name: 'Grace Hopper', email: 'grace@example.com' },
+      ...overrides,
+    },
+  };
+}
+
+export function cancelEvent(eventId: string, externalId = 'CHA-1001') {
+  return { eventId, type: 'booking.cancelled', data: { externalId } };
+}
