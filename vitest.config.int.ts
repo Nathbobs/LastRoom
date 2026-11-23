@@ -10,11 +10,14 @@ export default defineConfig({
     include: ['test/**/*.int-spec.ts'],
     testTimeout: 15000,
     hookTimeout: 15000,
+    // Files share one test database and wipe it between tests: run them one at a time.
+    fileParallelism: false,
     env: {
       MONGO_URI:
         process.env.MONGO_URI ??
         'mongodb://localhost:27017/lastroom_test?directConnection=true',
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
+      API_KEY: process.env.API_KEY ?? 'test-api-key-0123456789',
     },
   },
 });

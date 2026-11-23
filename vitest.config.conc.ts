@@ -16,6 +16,7 @@ export default defineConfig({
         process.env.MONGO_URI ??
         'mongodb://localhost:27017/lastroom_test?directConnection=true',
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
+      API_KEY: process.env.API_KEY ?? 'test-api-key-0123456789',
     },
   },
 });
