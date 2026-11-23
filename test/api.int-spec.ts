@@ -439,7 +439,7 @@ describe('Phase 2 API (integration)', () => {
   });
 
   describe('Swagger', () => {
-    it('/docs-json lists every Phase 2 endpoint and is public', async () => {
+    it('/docs-json lists every endpoint and is public', async () => {
       const res = await api().get('/docs-json').expect(200);
       const paths = (res.body as { paths: Record<string, object> }).paths;
       const routes = Object.entries(paths)
@@ -456,6 +456,7 @@ describe('Phase 2 API (integration)', () => {
         'POST /reservations',
         'POST /reservations/{id}/cancel',
         'POST /room-types',
+        'POST /webhooks/channels/{channel}',
         'PUT /room-types/{id}/inventory',
       ]);
     });

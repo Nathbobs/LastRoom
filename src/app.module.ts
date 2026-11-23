@@ -7,6 +7,7 @@ import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
 import { createValidationPipe } from './common/validation.js';
 import { Env, validateEnv } from './config/env.validation.js';
 import { AvailabilityModule } from './availability/availability.module.js';
+import { ChannelsModule } from './channels/channels.module.js';
 import { HealthModule } from './health/health.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { RedisModule } from './redis/redis.module.js';
@@ -30,6 +31,7 @@ import { RoomTypesModule } from './room-types/room-types.module.js';
     RoomTypesModule,
     AvailabilityModule,
     ReservationsModule,
+    ChannelsModule,
   ],
   providers: [
     // Registered here (not in main.ts) so tests that import AppModule get the

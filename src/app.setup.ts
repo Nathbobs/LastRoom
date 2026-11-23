@@ -28,7 +28,7 @@ export function configureApp(app: INestApplication): void {
         'Per-night room inventory and reservations that never double-book. ' +
           'Errors always use { error: { code, message, details, requestId } }.',
       )
-      .setVersion('0.2.0')
+      .setVersion('0.4.0')
       .addApiKey(
         { type: 'apiKey', in: 'header', name: API_KEY_HEADER },
         'api-key',
