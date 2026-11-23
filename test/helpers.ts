@@ -5,6 +5,7 @@ import type { Connection } from 'mongoose';
 import { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
 import { APP_OPTIONS, configureApp } from '../src/app.setup.js';
+import { signBody } from '../src/channels/channel-signature.guard.js';
 
 export const API_KEY = process.env.API_KEY ?? 'test-api-key-0123456789';
 
@@ -134,4 +135,26 @@ export function bookingEvent(
 
 export function cancelEvent(eventId: string, externalId = 'CHA-1001') {
   return { eventId, type: 'booking.cancelled', data: { externalId } };
+}
+
+/** Signs and POSTs a webhook to a LISTENING server; returns status + outcome. */
+export async function deliverWebhook(
+  baseUrl: string,
+  body: object,
+  channel = 'channel-a',
+): Promise<{ status: number; outcome?: string; code?: string }> {
+  const raw = JSON.stringify(body);
+  const res = await fetch(`${baseUrl}/webhooks/channels/${channel}`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-signature': signBody(CHANNEL_SECRETS[channel], raw),
+    },
+    body: raw,
+  });
+  const json = (await res.json()) as {
+    status?: string;
+    error?: { code: string };
+  };
+  return { status: res.status, outcome: json.status, code: json.error?.code };
 }

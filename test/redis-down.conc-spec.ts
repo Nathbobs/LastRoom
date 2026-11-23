@@ -10,9 +10,11 @@ import { createRedisClient } from '../src/redis/redis.module.js';
 import { Reservation } from '../src/reservations/reservation.schema.js';
 import {
   API_KEY,
+  bookingEvent,
   clearDatabase,
   createTestApp,
   DEAD_REDIS_URL,
+  deliverWebhook,
   race,
   stay,
   tally,
@@ -107,6 +109,18 @@ describe('Redis down: bookings stay correct', () => {
     );
     expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
     expect(new Set(results.map((r) => r.id)).size).toBe(1);
+    expect(await reservations.countDocuments()).toBe(1);
+  });
+
+  it('webhook: the same event 5 times in parallel still yields one reservation', async () => {
+    const rt = await createRoomType(5);
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        deliverWebhook(baseUrl, bookingEvent('evt_redis_down', rt)),
+      ),
+    );
+    expect(results.filter((r) => r.outcome === 'processed')).toHaveLength(1);
+    expect(results.filter((r) => r.outcome === 'duplicate')).toHaveLength(4);
     expect(await reservations.countDocuments()).toBe(1);
   });
 });
