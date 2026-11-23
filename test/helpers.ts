@@ -4,7 +4,7 @@ import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import type { Connection } from 'mongoose';
 import { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
-import { configureApp } from '../src/app.setup.js';
+import { APP_OPTIONS, configureApp } from '../src/app.setup.js';
 
 export const API_KEY = process.env.API_KEY ?? 'test-api-key-0123456789';
 
@@ -18,7 +18,8 @@ export async function createTestApp(
   const moduleRef = await override(
     Test.createTestingModule({ imports: [AppModule] }),
   ).compile();
-  const app = moduleRef.createNestApplication<INestApplication<App>>();
+  const app =
+    moduleRef.createNestApplication<INestApplication<App>>(APP_OPTIONS);
   configureApp(app);
   await app.init();
   return app;

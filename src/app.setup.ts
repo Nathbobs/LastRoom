@@ -1,7 +1,15 @@
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, NestApplicationOptions } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { API_KEY_HEADER } from './common/api-key.guard.js';
 import { requestIdMiddleware } from './common/request-id.js';
+
+/**
+ * Options that must be given when the app is CREATED (they can't be applied
+ * afterwards). rawBody keeps the exact request bytes on req.rawBody, which the
+ * webhook signature check needs: re-serialising the parsed JSON would not
+ * reproduce the bytes the channel signed (key order, whitespace, unicode escapes).
+ */
+export const APP_OPTIONS: NestApplicationOptions = { rawBody: true };
 
 /**
  * App-level setup that isn't a Nest provider. Shared by main.ts and the
