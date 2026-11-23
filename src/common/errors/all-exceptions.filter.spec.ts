@@ -6,6 +6,7 @@ import {
 import { AllExceptionsFilter, mapException } from './all-exceptions.filter.js';
 import {
   InvalidStateException,
+  InvalidSignatureException,
   NotImplementedException,
   RoomUnavailableException,
   ValidationException,
@@ -29,6 +30,7 @@ describe('mapException', () => {
     [new RoomUnavailableException('full'), 409, 'ROOM_UNAVAILABLE'],
     [new InvalidStateException('nope'), 409, 'INVALID_STATE'],
     [new NotImplementedException('later'), 501, 'NOT_IMPLEMENTED'],
+    [new InvalidSignatureException(), 401, 'INVALID_SIGNATURE'],
   ] as const)('maps %o to %i %s', (err, status, code) => {
     expect(mapException(err)).toMatchObject({ status, code });
   });

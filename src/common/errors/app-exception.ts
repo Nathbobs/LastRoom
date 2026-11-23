@@ -45,6 +45,13 @@ export class UnauthorizedException extends AppException {
   }
 }
 
+/** Webhook HMAC missing, malformed or wrong (Phase 4). Never says which part failed. */
+export class InvalidSignatureException extends AppException {
+  constructor(message = 'Missing or invalid webhook signature') {
+    super(ErrorCode.INVALID_SIGNATURE, HttpStatus.UNAUTHORIZED, message);
+  }
+}
+
 export class NotFoundException extends AppException {
   constructor(message: string, details: ErrorDetails = {}) {
     super(ErrorCode.NOT_FOUND, HttpStatus.NOT_FOUND, message, details);
