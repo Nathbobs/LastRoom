@@ -6,7 +6,7 @@ import type { Redis } from 'ioredis';
 // `import type` (erased at compile time) and read runtime values off the default export.
 import mongoose from 'mongoose';
 import type { Connection } from 'mongoose';
-import { REDIS_CLIENT } from '../redis/redis.module.js';
+import { REDIS_CLIENT } from '../redis/redis.constants.js';
 
 export type DependencyStatus = 'up' | 'down';
 
