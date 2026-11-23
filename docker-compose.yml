@@ -45,6 +45,8 @@ services:
       # Local-development default so `docker compose up` works from a clean clone.
       # Override it (API_KEY=... docker compose up) for anything that isn't your laptop.
       API_KEY: ${API_KEY:-local-dev-api-key-change-me}
+      # Same idea for the channel webhook secrets (placeholders, not real secrets).
+      CHANNEL_SECRETS: ${CHANNEL_SECRETS:-channel-a=local-dev-channel-a-secret,channel-b=local-dev-channel-b-secret}
     depends_on:
       mongo:
         condition: service_healthy

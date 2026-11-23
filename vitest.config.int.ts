@@ -18,6 +18,9 @@ export default defineConfig({
         'mongodb://localhost:27017/lastroom_test?directConnection=true',
       REDIS_URL: process.env.REDIS_URL ?? 'redis://localhost:6379',
       API_KEY: process.env.API_KEY ?? 'test-api-key-0123456789',
+      CHANNEL_SECRETS:
+        process.env.CHANNEL_SECRETS ??
+        'channel-a=test-channel-a-secret-0123,channel-b=test-channel-b-secret-0123',
     },
   },
 });

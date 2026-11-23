@@ -11,9 +11,14 @@ export interface Env {
   MONGO_URI: string;
   REDIS_URL: string;
   API_KEY: string;
+  /** Webhook HMAC secret per channel code, e.g. { 'channel-a': '...' }. May be empty. */
+  CHANNEL_SECRETS: Record<string, string>;
 }
 
 const MIN_API_KEY_LENGTH = 16;
+const MIN_CHANNEL_SECRET_LENGTH = 16;
+/** Channel codes appear in URLs and as Reservation.source. 'direct' is reserved. */
+export const CHANNEL_CODE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 export function validateEnv(raw: Record<string, unknown>): Env {
   const errors: string[] = [];
@@ -40,6 +45,8 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     errors.push(`API_KEY must be at least ${MIN_API_KEY_LENGTH} characters`);
   }
 
+  const channelSecrets = parseChannelSecrets(raw.CHANNEL_SECRETS, errors);
+
   if (errors.length > 0) {
     throw new Error(`Invalid environment:\n - ${errors.join('\n - ')}`);
   }
@@ -49,7 +56,48 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     MONGO_URI: mongoUri,
     REDIS_URL: redisUrl,
     API_KEY: apiKey,
+    CHANNEL_SECRETS: channelSecrets,
   };
+}
+
+/**
+ * CHANNEL_SECRETS=channel-a=<secret>,channel-b=<secret>
+ * Optional: with none configured, every webhook is rejected (401).
+ * Errors name the channel, never the secret.
+ */
+function parseChannelSecrets(
+  value: unknown,
+  errors: string[],
+): Record<string, string> {
+  const secrets: Record<string, string> = {};
+  if (value === undefined || value === '') return secrets;
+  if (typeof value !== 'string') {
+    errors.push('CHANNEL_SECRETS must be a string');
+    return secrets;
+  }
+  for (const entry of value.split(',')) {
+    const eq = entry.indexOf('=');
+    const code = (eq === -1 ? entry : entry.slice(0, eq)).trim();
+    const secret = eq === -1 ? '' : entry.slice(eq + 1).trim();
+    if (!CHANNEL_CODE_PATTERN.test(code) || code === 'direct') {
+      errors.push(
+        'CHANNEL_SECRETS: each entry must be <channel-code>=<secret> with a lowercase code (a-z, 0-9, -) other than "direct"',
+      );
+      continue;
+    }
+    if (secret.length < MIN_CHANNEL_SECRET_LENGTH) {
+      errors.push(
+        `CHANNEL_SECRETS: secret for "${code}" must be at least ${MIN_CHANNEL_SECRET_LENGTH} characters`,
+      );
+      continue;
+    }
+    if (code in secrets) {
+      errors.push(`CHANNEL_SECRETS: "${code}" is listed twice`);
+      continue;
+    }
+    secrets[code] = secret;
+  }
+  return secrets;
 }
 
 function requireString(

@@ -8,7 +8,11 @@ const valid = {
 
 describe('validateEnv', () => {
   it('accepts a valid env and defaults PORT to 3000', () => {
-    expect(validateEnv(valid)).toEqual({ PORT: 3000, ...valid });
+    expect(validateEnv(valid)).toEqual({
+      PORT: 3000,
+      ...valid,
+      CHANNEL_SECRETS: {},
+    });
   });
 
   it('parses PORT as a number', () => {
@@ -40,5 +44,45 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...valid, REDIS_URL: 'http://x' })).toThrow(
       /REDIS_URL must start/,
     );
+  });
+
+  describe('CHANNEL_SECRETS', () => {
+    it('parses code=secret pairs', () => {
+      const env = validateEnv({
+        ...valid,
+        CHANNEL_SECRETS:
+          'channel-a=secret-a-0123456789, channel-b=secret=with=equals',
+      });
+      expect(env.CHANNEL_SECRETS).toEqual({
+        'channel-a': 'secret-a-0123456789',
+        'channel-b': 'secret=with=equals',
+      });
+    });
+
+    it('rejects a short secret without echoing it', () => {
+      const run = () =>
+        validateEnv({ ...valid, CHANNEL_SECRETS: 'channel-a=tooshort' });
+      expect(run).toThrow(/secret for "channel-a" must be at least 16/);
+      expect(run).not.toThrow(/tooshort/);
+    });
+
+    it.each([
+      'Channel-A=secret-0123456789',
+      'direct=secret-0123456789',
+      'no-secret',
+    ])('rejects a bad entry %j', (value) => {
+      expect(() => validateEnv({ ...valid, CHANNEL_SECRETS: value })).toThrow(
+        /CHANNEL_SECRETS/,
+      );
+    });
+
+    it('rejects a duplicate channel', () => {
+      expect(() =>
+        validateEnv({
+          ...valid,
+          CHANNEL_SECRETS: 'a=secret-0123456789,a=secret-9876543210',
+        }),
+      ).toThrow(/"a" is listed twice/);
+    });
   });
 });
