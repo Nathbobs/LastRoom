@@ -10,7 +10,10 @@ export interface Env {
   PORT: number;
   MONGO_URI: string;
   REDIS_URL: string;
+  API_KEY: string;
 }
+
+const MIN_API_KEY_LENGTH = 16;
 
 export function validateEnv(raw: Record<string, unknown>): Env {
   const errors: string[] = [];
@@ -31,11 +34,22 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     errors.push('REDIS_URL must start with redis:// or rediss://');
   }
 
+  const apiKey = requireString(raw, 'API_KEY', errors);
+  if (apiKey && apiKey.length < MIN_API_KEY_LENGTH) {
+    // Never echo the key itself in the error.
+    errors.push(`API_KEY must be at least ${MIN_API_KEY_LENGTH} characters`);
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid environment:\n - ${errors.join('\n - ')}`);
   }
 
-  return { PORT: port, MONGO_URI: mongoUri, REDIS_URL: redisUrl };
+  return {
+    PORT: port,
+    MONGO_URI: mongoUri,
+    REDIS_URL: redisUrl,
+    API_KEY: apiKey,
+  };
 }
 
 function requireString(

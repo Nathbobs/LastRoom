@@ -3,6 +3,7 @@ import { validateEnv } from './env.validation.js';
 const valid = {
   MONGO_URI: 'mongodb://localhost:27017/lastroom?directConnection=true',
   REDIS_URL: 'redis://localhost:6379',
+  API_KEY: 'test-api-key-0123456789',
 };
 
 describe('validateEnv', () => {
@@ -14,10 +15,16 @@ describe('validateEnv', () => {
     expect(validateEnv({ ...valid, PORT: '8080' }).PORT).toBe(8080);
   });
 
-  it('rejects a missing MONGO_URI and REDIS_URL, listing both', () => {
+  it('rejects missing required vars, listing all of them', () => {
     expect(() => validateEnv({})).toThrow(
-      /MONGO_URI is required[\s\S]*REDIS_URL is required/,
+      /MONGO_URI is required[\s\S]*REDIS_URL is required[\s\S]*API_KEY is required/,
     );
+  });
+
+  it('rejects a short API_KEY without echoing it', () => {
+    const run = () => validateEnv({ ...valid, API_KEY: 'shortkey' });
+    expect(run).toThrow(/API_KEY must be at least 16 characters/);
+    expect(run).not.toThrow(/shortkey/);
   });
 
   it('rejects a non-numeric PORT', () => {
