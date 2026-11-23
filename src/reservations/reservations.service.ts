@@ -11,10 +11,11 @@ import { isDuplicateKeyError } from '../common/mongo-errors.js';
 import { parseStay } from '../common/nights.js';
 import { InventoryService } from '../inventory/inventory.service.js';
 import { IdempotencyCache } from '../redis/idempotency-cache.service.js';
-import { RedisLockService } from '../redis/redis-lock.service.js';
+import { LockOutcome, RedisLockService } from '../redis/redis-lock.service.js';
 import { RoomTypesService } from '../room-types/room-types.service.js';
 import {
   assertSameRequest,
+  isSameRequest,
   parseIdempotencyKey,
   StayRequest,
 } from './idempotency.js';
@@ -38,6 +39,18 @@ export interface CreateReservationResult {
   reservation: ReservationResponseDto;
   /** True when an Idempotency-Key retry returned the original reservation. */
   replayed: boolean;
+}
+
+/** A booking as a channel sends it (Phase 4 webhook). */
+export interface ChannelBooking extends StayRequest {
+  source: string;
+  externalId: string;
+}
+
+export interface ChannelBookingResult {
+  reservation: ReservationResponseDto;
+  /** True when the booking/cancel had already been applied (no change made). */
+  alreadyApplied: boolean;
 }
 
 interface CachedCreate {
@@ -82,38 +95,14 @@ export class ReservationsService {
       if (replay) return { reservation: replay, replayed: true };
     }
 
-    await this.roomTypes.assertExists(dto.roomTypeId);
-    const roomTypeId = new Types.ObjectId(dto.roomTypeId);
-
     let doc: ReservationDocument;
     let lock: string;
     try {
-      [doc, lock] = await this.locks.withLock(
-        `lock:rt:${dto.roomTypeId}`,
-        LOCK_OPTIONS,
-        async (outcome) => {
-          // connection.transaction() retries the whole callback on transient
-          // errors (WriteConflict). Our own exceptions abort it immediately.
-          const created = await this.connection.transaction(async (session) => {
-            await this.inventory.claim(roomTypeId, nights, session);
-            const [reservation] = await this.reservations.create(
-              [
-                {
-                  roomTypeId,
-                  checkIn: dto.checkIn,
-                  checkOut: dto.checkOut,
-                  nights,
-                  guest: dto.guest,
-                  ...(idempotencyKey && { idempotencyKey }),
-                },
-              ],
-              { session },
-            );
-            return reservation;
-          });
-          return [created, outcome] as const;
-        },
-      );
+      ({ doc, lock } = await this.book({
+        ...toStayRequest(dto),
+        nights,
+        ...(idempotencyKey && { idempotencyKey }),
+      }));
     } catch (err) {
       // Same key, racing request won the insert: its transaction committed and
       // ours aborted (our claimed nights were rolled back). Return the winner.
@@ -190,6 +179,148 @@ export class ReservationsService {
   }
 
   /**
+   * booking.created from a channel (Phase 4). Same Layer A/B path as the API.
+   * The unique (source, externalId) index guarantees one reservation per
+   * channel booking, even if the channel sends it under several eventIds.
+   * A booking that already exists with the same stay is returned as-is
+   * (checked BEFORE claiming, so a redelivery never fails on a now-full night);
+   * one with different details is a conflict (409 INVALID_STATE).
+   */
+  async createFromChannel(
+    booking: ChannelBooking,
+  ): Promise<ChannelBookingResult> {
+    const started = Date.now();
+    const nights = parseStay(booking.checkIn, booking.checkOut);
+    const existing = await this.findExisting(booking);
+    if (existing) return existing;
+
+    try {
+      const { doc, lock } = await this.book({ ...booking, nights });
+      const reservation = toReservationResponse(doc);
+      this.logger.log(
+        `reservation created reservationId=${reservation.id} roomTypeId=${reservation.roomTypeId} source=${booking.source} nights=${nights.length} lock=${lock} durationMs=${Date.now() - started}`,
+      );
+      return { reservation, alreadyApplied: false };
+    } catch (err) {
+      if (isDuplicateKeyError(err)) {
+        const winner = await this.findExisting(booking);
+        if (winner) return winner;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * booking.cancelled from a channel. 404 if we never saw the booking (e.g. the
+   * cancel arrived first); cancelling twice is a no-op, not an error.
+   */
+  async cancelFromChannel(
+    source: string,
+    externalId: string,
+  ): Promise<ChannelBookingResult> {
+    const find = () => this.reservations.findOne({ source, externalId });
+    const existing = await find();
+    if (!existing) {
+      throw new NotFoundException('No reservation for this channel booking', {
+        source,
+        externalId,
+      });
+    }
+    if (existing.status === ReservationStatus.CANCELLED) {
+      return {
+        reservation: toReservationResponse(existing),
+        alreadyApplied: true,
+      };
+    }
+    try {
+      const reservation = await this.cancel(existing._id.toString());
+      return { reservation, alreadyApplied: false };
+    } catch (err) {
+      // Lost a race with another cancel: fine, it's cancelled.
+      const now = err instanceof InvalidStateException ? await find() : null;
+      if (now?.status === ReservationStatus.CANCELLED) {
+        return {
+          reservation: toReservationResponse(now),
+          alreadyApplied: true,
+        };
+      }
+      throw err;
+    }
+  }
+
+  private async findExisting(
+    booking: ChannelBooking,
+  ): Promise<ChannelBookingResult | undefined> {
+    const existing = await this.reservations.findOne({
+      source: booking.source,
+      externalId: booking.externalId,
+    });
+    if (!existing) return undefined;
+    if (!isSameRequest(booking, toStoredRequest(existing))) {
+      throw new InvalidStateException(
+        'This channel booking already exists with different details',
+        {
+          source: booking.source,
+          externalId: booking.externalId,
+          reservationId: existing._id.toString(),
+        },
+      );
+    }
+    return {
+      reservation: toReservationResponse(existing),
+      alreadyApplied: true,
+    };
+  }
+
+  /**
+   * Layers B + A, shared by the API and the channel webhook: per-room-type
+   * lock (optional), then one transaction that claims every night and inserts
+   * the reservation. Throws 404 / 409 ROOM_UNAVAILABLE / E11000.
+   */
+  private async book(
+    params: StayRequest & {
+      nights: string[];
+      source?: string;
+      externalId?: string;
+      idempotencyKey?: string;
+    },
+  ): Promise<{ doc: ReservationDocument; lock: LockOutcome }> {
+    await this.roomTypes.assertExists(params.roomTypeId);
+    const roomTypeId = new Types.ObjectId(params.roomTypeId);
+
+    return this.locks.withLock(
+      `lock:rt:${params.roomTypeId}`,
+      LOCK_OPTIONS,
+      async (lock) => {
+        // connection.transaction() retries the whole callback on transient
+        // errors (WriteConflict). Our own exceptions abort it immediately.
+        const doc = await this.connection.transaction(async (session) => {
+          await this.inventory.claim(roomTypeId, params.nights, session);
+          const [reservation] = await this.reservations.create(
+            [
+              {
+                roomTypeId,
+                checkIn: params.checkIn,
+                checkOut: params.checkOut,
+                nights: params.nights,
+                guest: params.guest,
+                ...(params.source && { source: params.source }),
+                ...(params.externalId && { externalId: params.externalId }),
+                ...(params.idempotencyKey && {
+                  idempotencyKey: params.idempotencyKey,
+                }),
+              },
+            ],
+            { session },
+          );
+          return reservation;
+        });
+        return { doc, lock };
+      },
+    );
+  }
+
+  /**
    * Looks the key up in Redis, then in MongoDB (the durable record). Throws 409
    * if the key belongs to a different request. Undefined = first use.
    * Failed requests are never stored: their transaction aborted, so nothing
@@ -210,12 +341,7 @@ export class ReservationsService {
 
     const existing = await this.reservations.findOne({ idempotencyKey: key });
     if (!existing) return undefined;
-    const original: StayRequest = {
-      roomTypeId: existing.roomTypeId.toString(),
-      checkIn: existing.checkIn,
-      checkOut: existing.checkOut,
-      guest: { name: existing.guest.name, email: existing.guest.email },
-    };
+    const original = toStoredRequest(existing);
     assertSameRequest(toStayRequest(dto), original);
     const response = toReservationResponse(existing);
     await this.idempotency.set(IDEMPOTENCY_SCOPE, key, {
@@ -275,6 +401,15 @@ function toStayRequest(dto: CreateReservationDto): StayRequest {
     checkIn: dto.checkIn,
     checkOut: dto.checkOut,
     guest: { name: dto.guest.name, email: dto.guest.email },
+  };
+}
+
+function toStoredRequest(doc: ReservationDocument): StayRequest {
+  return {
+    roomTypeId: doc.roomTypeId.toString(),
+    checkIn: doc.checkIn,
+    checkOut: doc.checkOut,
+    guest: { name: doc.guest.name, email: doc.guest.email },
   };
 }
 
