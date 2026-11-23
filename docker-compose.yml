@@ -1,0 +1,59 @@
+services:
+  mongo:
+    image: mongo:8.0
+    # A single-node replica set: MongoDB transactions require a replica set.
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      # Initiates the replica set on first start (idempotent: rs.status() only
+      # throws before initiation), then reports healthy only once this node is
+      # PRIMARY, i.e. ready to accept writes and transactions.
+      # The member host is "mongo:27017" (the compose service name), which is
+      # why connections from the host machine need ?directConnection=true.
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - "try { rs.status() } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }) }; quit(db.hello().isWritablePrimary ? 0 : 1)"
+      interval: 5s
+      timeout: 10s
+      start_period: 20s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      PORT: 3000
+      MONGO_URI: mongodb://mongo:27017/lastroom?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      # Only "started", not "healthy": the API must work without Redis.
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
+      interval: 10s
+      timeout: 3s
+      start_period: 15s
+      retries: 5
+
+volumes:
+  mongo-data:
