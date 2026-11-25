@@ -41,10 +41,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const mapped = mapException(exception);
     if (mapped.status >= 500 && mapped.code === ErrorCode.INTERNAL_ERROR) {
       // Log the real error server-side; the client only gets a generic message.
-      this.logger.error(
-        `Unhandled error on ${req.method} ${req.path} (requestId=${req.requestId})`,
-        exception instanceof Error ? exception.stack : String(exception),
-      );
+      // requestId is added by pino from the request context, and `err` gets
+      // pino's error serializer (type, message, stack).
+      this.logger.error({
+        msg: 'unhandled error',
+        method: req.method,
+        path: req.path,
+        err:
+          exception instanceof Error ? exception : new Error(String(exception)),
+      });
     }
 
     const body: ErrorBody = {
