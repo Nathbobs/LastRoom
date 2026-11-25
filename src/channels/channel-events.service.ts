@@ -90,7 +90,22 @@ export class ChannelEventsService {
       const reclaimed = await this.reclaim(source, envelope.eventId);
       if (!reclaimed) return this.duplicate(source, envelope.eventId);
       event = reclaimed;
+      this.logger.log({
+        msg: 'channel event reclaimed',
+        source,
+        eventId: event.eventId,
+        type: event.type,
+        attempt: event.attempts,
+      });
+      return this.process(event);
     }
+    // First line of a webhook's trace: the event is now durable in the inbox.
+    this.logger.log({
+      msg: 'channel event received',
+      source,
+      eventId: event.eventId,
+      type: event.type,
+    });
     return this.process(event);
   }
 
