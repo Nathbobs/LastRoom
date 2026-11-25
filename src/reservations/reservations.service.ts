@@ -7,6 +7,7 @@ import {
   NotFoundException,
   ValidationException,
 } from '../common/errors/app-exception.js';
+import { maskEmail } from '../common/mask.js';
 import { isDuplicateKeyError } from '../common/mongo-errors.js';
 import { parseStay } from '../common/nights.js';
 import { InventoryService } from '../inventory/inventory.service.js';
@@ -96,7 +97,7 @@ export class ReservationsService {
     }
 
     let doc: ReservationDocument;
-    let lock: string;
+    let lock: LockOutcome;
     try {
       ({ doc, lock } = await this.book({
         ...toStayRequest(dto),
@@ -120,9 +121,7 @@ export class ReservationsService {
         response: reservation,
       } satisfies CachedCreate);
     }
-    this.logger.log(
-      `reservation created reservationId=${reservation.id} roomTypeId=${reservation.roomTypeId} nights=${nights.length} lock=${lock} durationMs=${Date.now() - started}`,
-    );
+    this.logCreated(reservation, nights.length, lock, started);
     return { reservation, replayed: false };
   }
 
@@ -172,9 +171,13 @@ export class ReservationsService {
       return updated;
     });
 
-    this.logger.log(
-      `reservation cancelled reservationId=${id} roomTypeId=${doc.roomTypeId.toString()}`,
-    );
+    this.logger.log({
+      msg: 'reservation cancelled',
+      reservationId: id,
+      roomTypeId: doc.roomTypeId.toString(),
+      source: doc.source,
+      nights: doc.nights.length,
+    });
     return toReservationResponse(doc);
   }
 
@@ -197,9 +200,7 @@ export class ReservationsService {
     try {
       const { doc, lock } = await this.book({ ...booking, nights });
       const reservation = toReservationResponse(doc);
-      this.logger.log(
-        `reservation created reservationId=${reservation.id} roomTypeId=${reservation.roomTypeId} source=${booking.source} nights=${nights.length} lock=${lock} durationMs=${Date.now() - started}`,
-      );
+      this.logCreated(reservation, nights.length, lock, started);
       return { reservation, alreadyApplied: false };
     } catch (err) {
       if (isDuplicateKeyError(err)) {
@@ -270,6 +271,29 @@ export class ReservationsService {
       reservation: toReservationResponse(existing),
       alreadyApplied: true,
     };
+  }
+
+  /**
+   * One structured line per booking: the domain fields are real JSON keys so
+   * logs can be filtered by reservationId / roomTypeId. requestId is added by
+   * pino from the request context. The guest email is masked.
+   */
+  private logCreated(
+    reservation: ReservationResponseDto,
+    nights: number,
+    lock: LockOutcome,
+    started: number,
+  ): void {
+    this.logger.log({
+      msg: 'reservation created',
+      reservationId: reservation.id,
+      roomTypeId: reservation.roomTypeId,
+      source: reservation.source,
+      nights,
+      lock,
+      guestEmail: maskEmail(reservation.guest.email),
+      durationMs: Date.now() - started,
+    });
   }
 
   /**
