@@ -21,6 +21,7 @@ import {
   parseIdempotencyKey,
   StayRequest,
 } from './idempotency.js';
+import { assertCancellable } from './reservation-status.js';
 import {
   Reservation,
   ReservationDocument,
@@ -149,12 +150,7 @@ export class ReservationsService {
           reservationId: id,
         });
       }
-      if (existing.status === ReservationStatus.CANCELLED) {
-        throw new InvalidStateException('Reservation is already cancelled', {
-          reservationId: id,
-          status: existing.status,
-        });
-      }
+      assertCancellable(id, existing.status);
 
       const updated = await this.reservations.findOneAndUpdate(
         { _id, status: ReservationStatus.CONFIRMED },
