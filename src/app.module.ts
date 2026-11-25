@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
+import { LoggerModule } from 'nestjs-pino';
 import { ApiKeyGuard } from './common/api-key.guard.js';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
+import { buildLoggerParams } from './common/logger.config.js';
 import { createValidationPipe } from './common/validation.js';
 import { Env, validateEnv } from './config/env.validation.js';
 import { AvailabilityModule } from './availability/availability.module.js';
@@ -17,6 +19,12 @@ import { RoomTypesModule } from './room-types/room-types.module.js';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // JSON logs with requestId on every line (see logger.config.ts).
+    LoggerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) =>
+        buildLoggerParams(config.get('LOG_LEVEL', { infer: true })),
+    }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
