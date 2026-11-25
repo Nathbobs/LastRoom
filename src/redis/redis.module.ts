@@ -34,11 +34,14 @@ export function createRedisClient(url: string): Redis {
   // reconnect attempt. Log only on state changes to avoid log spam.
   let lastState: 'up' | 'down' | undefined;
   client.on('ready', () => {
-    if (lastState !== 'up') logger.log('Redis connected');
+    if (lastState !== 'up') logger.log({ msg: 'Redis connected' });
     lastState = 'up';
   });
   client.on('error', (err: Error) => {
-    if (lastState !== 'down') logger.warn(`Redis unavailable: ${err.message}`);
+    // Only the message: never the URL, which may carry a password.
+    if (lastState !== 'down') {
+      logger.warn({ msg: 'Redis unavailable', reason: err.message });
+    }
     lastState = 'down';
   });
 

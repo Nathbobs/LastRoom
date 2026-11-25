@@ -22,7 +22,10 @@ export class IdempotencyCache {
       const raw = await this.redis.get(redisKey(scope, key));
       return raw === null ? undefined : (JSON.parse(raw) as T);
     } catch (err) {
-      this.logger.debug(`idempotency cache read skipped: ${errMessage(err)}`);
+      this.logger.debug({
+        msg: 'idempotency cache read skipped',
+        reason: errMessage(err),
+      });
       return undefined;
     }
   }
@@ -36,7 +39,10 @@ export class IdempotencyCache {
         IDEMPOTENCY_TTL_SECONDS,
       );
     } catch (err) {
-      this.logger.debug(`idempotency cache write skipped: ${errMessage(err)}`);
+      this.logger.debug({
+        msg: 'idempotency cache write skipped',
+        reason: errMessage(err),
+      });
     }
   }
 }

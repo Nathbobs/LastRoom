@@ -90,12 +90,12 @@ export class RedisLockService {
   /** Logs only when Redis goes down or comes back, not on every request. */
   private markRedis(up: boolean, err?: unknown): void {
     if (!up && !this.redisDown) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this.logger.warn(
-        `Redis lock unavailable, continuing without it (MongoDB still guarantees correctness): ${reason}`,
-      );
+      this.logger.warn({
+        msg: 'Redis lock unavailable, continuing without it (MongoDB still guarantees correctness)',
+        reason: err instanceof Error ? err.message : String(err),
+      });
     } else if (up && this.redisDown) {
-      this.logger.log('Redis lock available again');
+      this.logger.log({ msg: 'Redis lock available again' });
     }
     this.redisDown = !up;
   }
