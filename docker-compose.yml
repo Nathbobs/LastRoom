@@ -47,6 +47,7 @@ services:
       API_KEY: ${API_KEY:-local-dev-api-key-change-me}
       # Same idea for the channel webhook secrets (placeholders, not real secrets).
       CHANNEL_SECRETS: ${CHANNEL_SECRETS:-channel-a=local-dev-channel-a-secret,channel-b=local-dev-channel-b-secret}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       mongo:
         condition: service_healthy
