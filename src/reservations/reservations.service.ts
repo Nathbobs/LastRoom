@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import {
   InvalidStateException,
   NotFoundException,
+  RoomUnavailableException,
   ValidationException,
 } from '../common/errors/app-exception.js';
 import { maskEmail } from '../common/mask.js';
@@ -59,6 +60,13 @@ interface CachedCreate {
   response: ReservationResponseDto;
 }
 
+type BookParams = StayRequest & {
+  nights: string[];
+  source?: string;
+  externalId?: string;
+  idempotencyKey?: string;
+};
+
 @Injectable()
 export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
@@ -93,7 +101,7 @@ export class ReservationsService {
 
     if (idempotencyKey) {
       const replay = await this.findReplay(dto, idempotencyKey);
-      if (replay) return { reservation: replay, replayed: true };
+      if (replay) return this.replayed(replay);
     }
 
     let doc: ReservationDocument;
@@ -109,7 +117,7 @@ export class ReservationsService {
       // ours aborted (our claimed nights were rolled back). Return the winner.
       if (idempotencyKey && isDuplicateKeyError(err)) {
         const replay = await this.findReplay(dto, idempotencyKey);
-        if (replay) return { reservation: replay, replayed: true };
+        if (replay) return this.replayed(replay);
       }
       throw err;
     }
@@ -273,6 +281,18 @@ export class ReservationsService {
     };
   }
 
+  private replayed(
+    reservation: ReservationResponseDto,
+  ): CreateReservationResult {
+    // The key itself is not logged: it's a client-chosen value, like a token.
+    this.logger.log({
+      msg: 'idempotent replay',
+      reservationId: reservation.id,
+      roomTypeId: reservation.roomTypeId,
+    });
+    return { reservation, replayed: true };
+  }
+
   /**
    * One structured line per booking: the domain fields are real JSON keys so
    * logs can be filtered by reservationId / roomTypeId. requestId is added by
@@ -302,12 +322,7 @@ export class ReservationsService {
    * the reservation. Throws 404 / 409 ROOM_UNAVAILABLE / E11000.
    */
   private async book(
-    params: StayRequest & {
-      nights: string[];
-      source?: string;
-      externalId?: string;
-      idempotencyKey?: string;
-    },
+    params: BookParams,
   ): Promise<{ doc: ReservationDocument; lock: LockOutcome }> {
     await this.roomTypes.assertExists(params.roomTypeId);
     const roomTypeId = new Types.ObjectId(params.roomTypeId);
@@ -316,32 +331,56 @@ export class ReservationsService {
       `lock:rt:${params.roomTypeId}`,
       LOCK_OPTIONS,
       async (lock) => {
-        // connection.transaction() retries the whole callback on transient
-        // errors (WriteConflict). Our own exceptions abort it immediately.
-        const doc = await this.connection.transaction(async (session) => {
-          await this.inventory.claim(roomTypeId, params.nights, session);
-          const [reservation] = await this.reservations.create(
-            [
-              {
-                roomTypeId,
-                checkIn: params.checkIn,
-                checkOut: params.checkOut,
-                nights: params.nights,
-                guest: params.guest,
-                ...(params.source && { source: params.source }),
-                ...(params.externalId && { externalId: params.externalId }),
-                ...(params.idempotencyKey && {
-                  idempotencyKey: params.idempotencyKey,
-                }),
-              },
-            ],
-            { session },
-          );
-          return reservation;
-        });
+        const doc = await this.claimAndInsert(params, roomTypeId, lock);
         return { doc, lock };
       },
     );
+  }
+
+  /** Layer A. Logs a rejected booking (info: a full night is normal). */
+  private async claimAndInsert(
+    params: BookParams,
+    roomTypeId: Types.ObjectId,
+    lock: LockOutcome,
+  ): Promise<ReservationDocument> {
+    try {
+      // connection.transaction() retries the whole callback on transient
+      // errors (WriteConflict). Our own exceptions abort it immediately.
+      return await this.connection.transaction(async (session) => {
+        await this.inventory.claim(roomTypeId, params.nights, session);
+        const [reservation] = await this.reservations.create(
+          [
+            {
+              roomTypeId,
+              checkIn: params.checkIn,
+              checkOut: params.checkOut,
+              nights: params.nights,
+              guest: params.guest,
+              ...(params.source && { source: params.source }),
+              ...(params.externalId && { externalId: params.externalId }),
+              ...(params.idempotencyKey && {
+                idempotencyKey: params.idempotencyKey,
+              }),
+            },
+          ],
+          { session },
+        );
+        return reservation;
+      });
+    } catch (err) {
+      if (err instanceof RoomUnavailableException) {
+        this.logger.log({
+          msg: 'booking rejected',
+          code: err.code,
+          roomTypeId: params.roomTypeId,
+          source: params.source ?? 'direct',
+          nights: params.nights.length,
+          night: err.details.night,
+          lock,
+        });
+      }
+      throw err;
+    }
   }
 
   /**
