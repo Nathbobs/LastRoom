@@ -132,9 +132,13 @@ export class ChannelEventsService {
     eventId: string,
   ): Promise<WebhookResponseDto> {
     const existing = await this.events.findOne({ source, eventId }).lean();
-    this.logger.log(
-      `channel event duplicate source=${source} eventId=${eventId} eventStatus=${existing?.status}`,
-    );
+    this.logger.log({
+      msg: 'channel event duplicate',
+      source,
+      eventId,
+      eventStatus: existing?.status,
+      reservationId: existing?.reservationId?.toString(),
+    });
     return {
       status: WebhookOutcome.DUPLICATE,
       eventId,
@@ -153,7 +157,12 @@ export class ChannelEventsService {
     event: ChannelEventDocument,
   ): Promise<WebhookResponseDto> {
     const started = Date.now();
-    const log = `source=${event.source} eventId=${event.eventId} type=${event.type} attempt=${event.attempts}`;
+    const fields = {
+      source: event.source,
+      eventId: event.eventId,
+      type: event.type,
+      attempt: event.attempts,
+    };
     try {
       const result = await this.apply(event);
       const reservationId = new Types.ObjectId(result.reservation.id);
@@ -167,9 +176,14 @@ export class ChannelEventsService {
           },
         },
       );
-      this.logger.log(
-        `channel event processed ${log} reservationId=${result.reservation.id} alreadyApplied=${result.alreadyApplied} durationMs=${Date.now() - started}`,
-      );
+      this.logger.log({
+        msg: 'channel event processed',
+        ...fields,
+        reservationId: result.reservation.id,
+        roomTypeId: result.reservation.roomTypeId,
+        alreadyApplied: result.alreadyApplied,
+        durationMs: Date.now() - started,
+      });
       return {
         status: WebhookOutcome.PROCESSED,
         eventId: event.eventId,
@@ -200,13 +214,19 @@ export class ChannelEventsService {
         );
       } catch (markErr) {
         // Left as RECEIVED: a redelivery after STALE_AFTER_MS takes it over.
-        this.logger.error(
-          `could not mark channel event FAILED ${log}: ${String(markErr)}`,
-        );
+        this.logger.error({
+          msg: 'could not mark channel event FAILED',
+          ...fields,
+          err: markErr,
+        });
       }
-      this.logger.warn(
-        `channel event failed ${log} code=${error.code} retryable=${!expected} durationMs=${Date.now() - started}`,
-      );
+      this.logger.warn({
+        msg: 'channel event failed',
+        ...fields,
+        code: error.code,
+        retryable: !expected,
+        durationMs: Date.now() - started,
+      });
       // Unexpected: answer 500 so the channel redelivers, and we retry then.
       if (!expected) throw err;
       return {
