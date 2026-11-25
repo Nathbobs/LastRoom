@@ -1,5 +1,6 @@
 import type { INestApplication, NestApplicationOptions } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
 import { API_KEY_HEADER } from './common/api-key.guard.js';
 import { requestIdMiddleware } from './common/request-id.js';
 
@@ -16,6 +17,9 @@ export const APP_OPTIONS: NestApplicationOptions = { rawBody: true };
  * integration tests so both run the same app.
  */
 export function configureApp(app: INestApplication): void {
+  // Route Nest's own Logger (and every `new Logger(...)` in services) through
+  // pino, so all output is JSON and carries the request's requestId.
+  app.useLogger(app.get(Logger));
   // First, so every response (errors and 404s included) carries a request id.
   app.use(requestIdMiddleware);
   app.enableShutdownHooks();
