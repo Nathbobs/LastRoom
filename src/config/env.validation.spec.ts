@@ -12,7 +12,23 @@ describe('validateEnv', () => {
       PORT: 3000,
       ...valid,
       CHANNEL_SECRETS: {},
+      LOG_LEVEL: 'info',
     });
+  });
+
+  it('accepts a known LOG_LEVEL', () => {
+    expect(validateEnv({ ...valid, LOG_LEVEL: 'debug' }).LOG_LEVEL).toBe(
+      'debug',
+    );
+    expect(validateEnv({ ...valid, LOG_LEVEL: 'silent' }).LOG_LEVEL).toBe(
+      'silent',
+    );
+  });
+
+  it('rejects an unknown LOG_LEVEL', () => {
+    expect(() => validateEnv({ ...valid, LOG_LEVEL: 'loud' })).toThrow(
+      /LOG_LEVEL must be one of: fatal, error, warn, info, debug, trace, silent/,
+    );
   });
 
   it('parses PORT as a number', () => {

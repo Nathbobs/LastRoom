@@ -13,7 +13,20 @@ export interface Env {
   API_KEY: string;
   /** Webhook HMAC secret per channel code, e.g. { 'channel-a': '...' }. May be empty. */
   CHANNEL_SECRETS: Record<string, string>;
+  /** pino level; 'silent' turns logging off. Defaults to 'info'. */
+  LOG_LEVEL: LogLevel;
 }
+
+export const LOG_LEVELS = [
+  'fatal',
+  'error',
+  'warn',
+  'info',
+  'debug',
+  'trace',
+  'silent',
+] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
 
 const MIN_API_KEY_LENGTH = 16;
 const MIN_CHANNEL_SECRET_LENGTH = 16;
@@ -47,6 +60,14 @@ export function validateEnv(raw: Record<string, unknown>): Env {
 
   const channelSecrets = parseChannelSecrets(raw.CHANNEL_SECRETS, errors);
 
+  const logLevel =
+    raw.LOG_LEVEL === undefined || raw.LOG_LEVEL === ''
+      ? 'info'
+      : String(raw.LOG_LEVEL);
+  if (!isLogLevel(logLevel)) {
+    errors.push(`LOG_LEVEL must be one of: ${LOG_LEVELS.join(', ')}`);
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid environment:\n - ${errors.join('\n - ')}`);
   }
@@ -57,7 +78,12 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     REDIS_URL: redisUrl,
     API_KEY: apiKey,
     CHANNEL_SECRETS: channelSecrets,
+    LOG_LEVEL: isLogLevel(logLevel) ? logLevel : 'info',
   };
+}
+
+function isLogLevel(value: string): value is LogLevel {
+  return (LOG_LEVELS as readonly string[]).includes(value);
 }
 
 /**
