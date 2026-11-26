@@ -128,3 +128,73 @@ one reservation). Events that fail are answered 200 so the channel stops
 retrying, and they stay in the inbox as FAILED. The dashed reconciliation step,
 which would compare inventory with reservations and report failed or stuck
 events, is not built yet (see [What I'd do next](#limitations-and-what-id-do-next)).
+
+## Design decisions
+
+- **Inventory is one document per room type per night**, `{ roomTypeId, date, total, booked }`,
+  with `0 <= booked <= total` enforced by a collection validator. A stay is
+  `[checkIn, checkOut)`, so a guest checking out on the 26th frees that night
+  for someone checking in.
+- **The MongoDB transaction is the double-booking guarantee; the Redis lock is
+  optional.** A Redis lease can expire while its holder is still working, so it
+  can't be what keeps bookings correct. See
+  [ADR-002](docs/adr/ADR-002-double-booking.md).
+- **Webhook idempotency comes from a MongoDB event inbox** with a unique
+  `(source, eventId)` index, and the signature is checked over the raw request
+  bytes. See [ADR-003](docs/adr/ADR-003-webhook-inbox.md).
+- **Structured JSON logs traced by `requestId`**, with guest emails masked and
+  no headers or bodies logged. `docker compose logs api | grep '"requestId":"<id>"'`
+  shows one request from start to finish. See
+  [ADR-004](docs/adr/ADR-004-structured-logging.md).
+- **CI starts MongoDB and Redis from the same `docker-compose.yml`** as local
+  development, because GitHub's service containers can't start MongoDB as a
+  replica set. See [ADR-005](docs/adr/ADR-005-ci-uses-compose.md).
+
+## API at a glance
+
+All endpoints except the webhook and `/health` need the `X-Api-Key` header.
+Request and response examples are in Swagger at `/docs`.
+
+| Method | Path                                  | What it does                                     |
+| ------ | ------------------------------------- | ------------------------------------------------ |
+| `POST` | `/room-types`                         | Create a room type, optionally seeding inventory |
+| `GET`  | `/room-types`                         | List room types                                  |
+| `PUT`  | `/room-types/:id/inventory`           | Set `total` for a range of nights                |
+| `GET`  | `/availability?roomTypeId=&from=&to=` | Free units per night                             |
+| `POST` | `/reservations`                       | Book a stay (optional `Idempotency-Key` header)  |
+| `GET`  | `/reservations`, `/reservations/:id`  | List or read reservations                        |
+| `POST` | `/reservations/:id/cancel`            | Cancel and give the nights back                  |
+| `POST` | `/webhooks/channels/:channel`         | Channel events, signed with HMAC                 |
+| `GET`  | `/health`                             | MongoDB and Redis status                         |
+
+Every error has the same shape, and the `requestId` matches the
+`X-Request-Id` response header and the log lines:
+
+```json
+{
+  "error": {
+    "code": "ROOM_UNAVAILABLE",
+    "message": "...",
+    "details": {},
+    "requestId": "..."
+  }
+}
+```
+
+Codes: `VALIDATION_ERROR` (400), `UNAUTHORIZED` and `INVALID_SIGNATURE` (401),
+`NOT_FOUND` (404), `ROOM_UNAVAILABLE` and `INVALID_STATE` (409),
+`INTERNAL_ERROR` (500).
+
+## Tests
+
+| Command              | What runs                                               | Count   |
+| -------------------- | ------------------------------------------------------- | ------- |
+| `npm test`           | unit tests, no I/O                                      | 124     |
+| `npm run test:int`   | the real app over HTTP against MongoDB and Redis        | 82      |
+| `npm run test:conc`  | parallel requests on a listening port, incl. Redis down | 14      |
+| `npm run test:smoke` | loads the compiled app under plain Node ESM             | 1 check |
+
+Integration and concurrency tests need `docker compose up -d mongo redis` and
+`npm install`. CI runs all of them plus the demo on a fresh stack on every push.
+[docs/testing.md](docs/testing.md) maps each requirement to the test that
+covers it.
