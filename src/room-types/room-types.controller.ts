@@ -6,7 +6,7 @@ import {
   ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
-import { ApiErrors } from '../common/error-response.dto.js';
+import { ApiConflict, ApiErrors } from '../common/error-response.dto.js';
 import { ParseObjectIdPipe } from '../common/parse-object-id.pipe.js';
 import {
   CreateRoomTypeDto,
@@ -29,7 +29,8 @@ export class RoomTypesController {
       'Create a room type, optionally seeding inventory for [seedFrom, seedTo)',
   })
   @ApiCreatedResponse({ type: RoomTypeResponseDto })
-  @ApiErrors(400, 409)
+  @ApiErrors(400)
+  @ApiConflict('nameTaken')
   create(@Body() dto: CreateRoomTypeDto): Promise<RoomTypeResponseDto> {
     return this.roomTypes.create(dto);
   }
@@ -48,7 +49,8 @@ export class RoomTypesController {
       'All-or-nothing: 409 INVALID_STATE (listing the nights) if any night already has more units booked than the new total.',
   })
   @ApiOkResponse({ type: SetInventoryResponseDto })
-  @ApiErrors(400, 404, 409)
+  @ApiErrors(400, 404)
+  @ApiConflict('belowBooked')
   setInventory(
     @Param('id', ParseObjectIdPipe) id: string,
     @Body() dto: SetInventoryDto,

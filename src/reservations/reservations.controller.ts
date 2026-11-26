@@ -19,7 +19,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { ApiErrors } from '../common/error-response.dto.js';
+import { ApiConflict, ApiErrors } from '../common/error-response.dto.js';
 import { ParseObjectIdPipe } from '../common/parse-object-id.pipe.js';
 import {
   CreateReservationDto,
@@ -51,7 +51,8 @@ export class ReservationsController {
       'Retries with the same key return the original response instead of booking twice.',
   })
   @ApiCreatedResponse({ type: ReservationResponseDto })
-  @ApiErrors(400, 404, 409)
+  @ApiErrors(400, 404)
+  @ApiConflict('roomUnavailable', 'keyReused')
   async create(
     @Body() dto: CreateReservationDto,
     @Res({ passthrough: true }) res: Response,
@@ -91,7 +92,8 @@ export class ReservationsController {
     summary: 'Cancel a reservation and release its nights',
   })
   @ApiOkResponse({ type: ReservationResponseDto })
-  @ApiErrors(400, 404, 409)
+  @ApiErrors(400, 404)
+  @ApiConflict('alreadyCancelled')
   cancel(
     @Param('id', ParseObjectIdPipe) id: string,
   ): Promise<ReservationResponseDto> {

@@ -43,7 +43,6 @@ const DESCRIPTIONS: Record<number, string> = {
   400: 'VALIDATION_ERROR: invalid body, query, id or date range',
   401: 'UNAUTHORIZED: missing or invalid X-Api-Key',
   404: 'NOT_FOUND: unknown id',
-  409: 'ROOM_UNAVAILABLE (a night is full, nothing was claimed) or INVALID_STATE (the action conflicts with the current state)',
 };
 
 /** Every response carries the request id; error bodies repeat it. */
@@ -104,31 +103,6 @@ const EXAMPLES: Record<number, Record<string, ApiResponseExamples>> = {
       }),
     },
   },
-  409: {
-    roomUnavailable: {
-      summary: 'ROOM_UNAVAILABLE: a night of the stay is full',
-      value: errorBody(
-        'ROOM_UNAVAILABLE',
-        'No units left on 2026-12-24 for this room type',
-        { roomTypeId: '6b07c8c753db61eb67136efc', night: '2026-12-24' },
-      ),
-    },
-    alreadyCancelled: {
-      summary: 'INVALID_STATE: reservation already cancelled',
-      value: errorBody('INVALID_STATE', 'Reservation is already cancelled', {
-        reservationId: '6b07c8cf53db61eb67136f09',
-        status: 'CANCELLED',
-      }),
-    },
-    keyReused: {
-      summary: 'INVALID_STATE: Idempotency-Key reused for a different request',
-      value: errorBody(
-        'INVALID_STATE',
-        'Idempotency-Key was already used for a different request',
-        { header: 'Idempotency-Key' },
-      ),
-    },
-  },
 };
 
 export function errorBody(
@@ -154,6 +128,74 @@ export function ApiErrors(
       }),
     ),
   );
+}
+
+/**
+ * 409s mean different things per endpoint, so each endpoint lists its own
+ * (real bodies, captured from the running API).
+ */
+const CONFLICTS = {
+  roomUnavailable: {
+    summary:
+      'ROOM_UNAVAILABLE: a night of the stay is full (nothing was claimed)',
+    value: errorBody(
+      'ROOM_UNAVAILABLE',
+      'No units left on 2026-12-24 for this room type',
+      { roomTypeId: '6b07c8c753db61eb67136efc', night: '2026-12-24' },
+    ),
+  },
+  keyReused: {
+    summary: 'INVALID_STATE: Idempotency-Key reused for a different request',
+    value: errorBody(
+      'INVALID_STATE',
+      'Idempotency-Key was already used for a different request',
+      { header: 'Idempotency-Key' },
+    ),
+  },
+  alreadyCancelled: {
+    summary: 'INVALID_STATE: reservation already cancelled',
+    value: errorBody('INVALID_STATE', 'Reservation is already cancelled', {
+      reservationId: '6b07c8cf53db61eb67136f09',
+      status: 'CANCELLED',
+    }),
+  },
+  nameTaken: {
+    summary: 'INVALID_STATE: a room type with this name exists',
+    value: errorBody(
+      'INVALID_STATE',
+      'A room type with this name already exists',
+      { name: 'Deluxe Double' },
+    ),
+  },
+  belowBooked: {
+    summary: 'INVALID_STATE: new total is below units already booked',
+    value: errorBody(
+      'INVALID_STATE',
+      'total 0 is below the units already booked on 2 night(s)',
+      {
+        total: 0,
+        blockedNights: [
+          { date: '2026-12-24', booked: 1 },
+          { date: '2026-12-25', booked: 1 },
+        ],
+      },
+    ),
+  },
+} satisfies Record<string, ApiResponseExamples>;
+
+export type ConflictExample = keyof typeof CONFLICTS;
+
+/** Documents this endpoint's 409s, one example per case. */
+export function ApiConflict(
+  ...cases: ConflictExample[]
+): MethodDecorator & ClassDecorator {
+  return ApiResponse({
+    status: 409,
+    description: cases.map((c) => CONFLICTS[c].summary).join('; '),
+    type: ErrorResponseDto,
+    headers: REQUEST_ID_RESPONSE_HEADER,
+    examples: Object.fromEntries(cases.map((c) => [c, CONFLICTS[c]])),
+  });
 }
 
 /** The webhook's 401: same body for every signature failure, by design. */
