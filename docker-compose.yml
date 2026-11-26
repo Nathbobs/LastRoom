@@ -36,6 +36,9 @@ services:
 
   api:
     build: .
+    # Docker's tiny init as PID 1: forwards SIGTERM to Node and reaps zombies,
+    # so `docker compose stop` runs Nest's shutdown hooks instead of a kill.
+    init: true
     ports:
       - '${PORT:-3000}:3000'
     environment:
@@ -54,12 +57,8 @@ services:
       # Only "started", not "healthy": the API must work without Redis.
       redis:
         condition: service_started
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
-      interval: 10s
-      timeout: 3s
-      start_period: 15s
-      retries: 5
+    # Healthcheck comes from the Dockerfile (HEALTHCHECK), so the image reports
+    # its health the same way with or without compose.
 
 volumes:
   mongo-data:
