@@ -198,3 +198,39 @@ Integration and concurrency tests need `docker compose up -d mongo redis` and
 `npm install`. CI runs all of them plus the demo on a fresh stack on every push.
 [docs/testing.md](docs/testing.md) maps each requirement to the test that
 covers it.
+
+## Limitations and what I'd do next
+
+- **Reconciliation job (planned, not built).** A scheduled job that checks
+  `booked` against the CONFIRMED reservations for every night, and reports
+  FAILED or stuck RECEIVED webhook events, including a cancel that arrived
+  before its booking. It would report, not fix.
+- **Queue-based webhook processing.** Today the webhook processes the event
+  before answering. Acknowledging right after the inbox insert and processing
+  from a queue would answer channels faster under load; the RECEIVED rows can
+  already act as that queue.
+- **Real channel APIs.** The channel is a mock with a simple JSON payload. Real
+  OTAs each have their own formats, retry rules and availability push.
+- **Multi-property.** One operator, one property. Tenancy would need a
+  property id on every document and in every index.
+- **Smaller image.** The runtime image is 253 MB, mostly the Node binary and
+  production dependencies (TypeScript is pulled in by `@nestjs/swagger`).
+
+Out of scope on purpose: payments, pricing, guest UI.
+
+## How it was built
+
+Built with Claude Code as a coding agent. I wrote the spec and made the design
+decisions (per-night inventory, transactions as the guarantee, Redis as an
+optional optimisation), and reviewed and tested the generated code. The code
+and ADRs were drafted with Claude Code.
+
+## References
+
+Ideas I learned from (credited, not copied):
+
+- AWS Builder, [Designing a Flash-Sale Seat Reservation System (Part 2): Never Sell a Seat Twice](https://builder.aws.com/content/3JnLIIiUojSd8QGb32xPTQdumEZ/designing-a-flash-sale-seat-reservation-system-in-aws-part-2-never-sell-a-seat-twice): invariants, failure modes, race tests, a reconciler.
+- Adamo Software, [Building a Real-Time Hotel Booking Engine: double-booking across 6 OTAs](https://dev.to/adamo_software/building-a-real-time-hotel-booking-engine-how-we-solved-double-booking-across-6-otas-3g7o): optimistic locking, reconciling channels.
+- [tweetgeek/hotel-room-booking-mvp](https://github.com/tweetgeek/hotel-room-booking-mvp): NestJS booking with ADRs and a concurrency integration test.
+- [Payment Webhooks Will Lie To You](https://dev.to/mickyarun/payment-webhooks-will-lie-to-you-heres-how-we-built-ones-that-dont-in-nestjs-30g9): raw-body HMAC, ack fast, dedupe by event id.
+- [Redis Locks: Working, Failure Modes and Real-World Examples](https://engineeringatscale.substack.com/p/redis-distributed-locks-explained): why the database must enforce the constraint.
