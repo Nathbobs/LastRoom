@@ -1,7 +1,15 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
-import { API_KEY, clearDatabase, createTestApp, stay } from './helpers.js';
+import { signBody } from '../src/channels/channel-signature.guard.js';
+import {
+  API_KEY,
+  bookingEvent,
+  CHANNEL_SECRETS,
+  clearDatabase,
+  createTestApp,
+  stay,
+} from './helpers.js';
 import { LogCapture, LogLine } from './log-capture.js';
 
 /**
@@ -25,6 +33,17 @@ describe('Structured logs (integration)', () => {
       })
       .expect(201);
     return (res.body as { id: string }).id;
+  }
+
+  /** Signs and sends a webhook through supertest (raw body preserved). */
+  function webhook(body: object, requestId: string, channel = 'channel-a') {
+    const raw = JSON.stringify(body);
+    return api()
+      .post(`/webhooks/channels/${channel}`)
+      .set('Content-Type', 'application/json')
+      .set('X-Request-Id', requestId)
+      .set('X-Signature', signBody(CHANNEL_SECRETS[channel], raw))
+      .send(raw);
   }
 
   const completed = (requestId: string) => (l: LogLine) =>
@@ -122,5 +141,55 @@ describe('Structured logs (integration)', () => {
       source: 'direct',
       night: '2026-12-24',
     });
+  });
+
+  it('never logs the API key, HMAC secret, signature, idempotency key or full guest email', async () => {
+    const roomTypeId = await createRoomType(3);
+    const email = 'very.private.guest@example.com';
+    const idempotencyKey = 'idem-key-should-not-be-logged-42';
+
+    await post('/reservations')
+      .set('X-Request-Id', 'trace-secrets-api')
+      .set('Idempotency-Key', idempotencyKey)
+      .send(stay(roomTypeId, { guest: { name: 'Private Guest', email } }))
+      .expect(201);
+    // A replay logs too: it must not leak the key either.
+    await post('/reservations')
+      .set('Idempotency-Key', idempotencyKey)
+      .send(stay(roomTypeId, { guest: { name: 'Private Guest', email } }))
+      .expect(201);
+
+    const event = bookingEvent('evt_secrets', roomTypeId, {
+      guest: { name: 'Channel Guest', email: 'channel.only.guest@example.com' },
+    });
+    const signature = signBody(
+      CHANNEL_SECRETS['channel-a'],
+      JSON.stringify(event),
+    );
+    await webhook(event, 'trace-secrets-webhook').expect(200);
+    // A bad signature is logged as a failed request: still no secret in it.
+    await api()
+      .post('/webhooks/channels/channel-a')
+      .set('Content-Type', 'application/json')
+      .set('X-Signature', 'sha256=' + '0'.repeat(64))
+      .send(JSON.stringify(event))
+      .expect(401);
+
+    await logs.waitFor(completed('trace-secrets-webhook'));
+    const text = logs.text();
+    expect(text.length).toBeGreaterThan(0);
+    for (const secret of [
+      API_KEY,
+      CHANNEL_SECRETS['channel-a'],
+      signature,
+      idempotencyKey,
+      email,
+      'very.private.guest',
+      'channel.only.guest',
+    ]) {
+      expect(text).not.toContain(secret);
+    }
+    // The masked form is what support gets instead.
+    expect(text).toContain('v***@example.com');
   });
 });
