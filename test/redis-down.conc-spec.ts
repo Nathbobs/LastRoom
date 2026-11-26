@@ -19,6 +19,7 @@ import {
   stay,
   tally,
 } from './helpers.js';
+import { LogCapture } from './log-capture.js';
 
 /**
  * Redis down (connection refused): no lock, no idempotency cache.
@@ -30,6 +31,8 @@ describe('Redis down: bookings stay correct', () => {
   let inventory: Model<Inventory>;
   let reservations: Model<Reservation>;
   const api = () => request(app.getHttpServer());
+  // info, not the suite's warn: the last test checks what the bookings logged.
+  const logs = new LogCapture('info');
 
   async function createRoomType(totalUnits: number) {
     const res = await api()
@@ -47,9 +50,11 @@ describe('Redis down: bookings stay correct', () => {
 
   beforeAll(async () => {
     app = await createTestApp((b) =>
-      b
-        .overrideProvider(REDIS_CLIENT)
-        .useFactory({ factory: () => createRedisClient(DEAD_REDIS_URL) }),
+      logs.override(
+        b
+          .overrideProvider(REDIS_CLIENT)
+          .useFactory({ factory: () => createRedisClient(DEAD_REDIS_URL) }),
+      ),
     );
     await app.listen(0);
     baseUrl = await app.getUrl();
@@ -122,5 +127,32 @@ describe('Redis down: bookings stay correct', () => {
     expect(results.filter((r) => r.outcome === 'processed')).toHaveLength(1);
     expect(results.filter((r) => r.outcome === 'duplicate')).toHaveLength(4);
     expect(await reservations.countDocuments()).toBe(1);
+  });
+
+  it('logs say what happened: lock=redis-down, and one warning instead of one per request', async () => {
+    const rt = await createRoomType(1);
+    await api()
+      .post('/reservations')
+      .set('X-Api-Key', API_KEY)
+      .set('X-Request-Id', 'redis-down-trace')
+      .send(stay(rt))
+      .expect(201);
+
+    const created = logs
+      .forRequest('redis-down-trace')
+      .find((l) => l.msg === 'reservation created');
+    expect(created).toMatchObject({ lock: 'redis-down', roomTypeId: rt });
+
+    // Every booking in this file ran without the lock...
+    const allCreated = logs.lines.filter(
+      (l) => l.msg === 'reservation created',
+    );
+    expect(allCreated.length).toBeGreaterThan(1);
+    expect(allCreated.every((l) => l.lock === 'redis-down')).toBe(true);
+    // ...but the outage was reported once, on the state change.
+    const lockWarnings = logs.lines.filter(
+      (l) => l.level === 40 && l.context === 'RedisLockService',
+    );
+    expect(lockWarnings).toHaveLength(1);
   });
 });
