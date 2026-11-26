@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Read-only token: CI never needs to write to the repo.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run still in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # Loads the compiled app under plain Node ESM (catches CJS import bugs
+      # that Vitest hides).
+      - run: npm run test:smoke
+
+  integration:
+    name: Integration + concurrency (Mongo replica set + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Not GitHub `services:`: service containers can't be given a start
+      # command, and MongoDB needs `--replSet rs0` for transactions. The compose
+      # file starts it that way and its healthcheck runs rs.initiate(); --wait
+      # blocks until Mongo is PRIMARY and Redis answers PING. Same setup as local.
+      - run: docker compose up -d --wait mongo redis
+      - run: npm run test:int
+      - run: npm run test:conc
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs mongo redis
+
+  e2e:
+    name: Fresh stack + demo:concurrency
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      # The spec's "done when": a clean checkout, `docker compose up`, then the
+      # demo, with no npm install (the demo only uses Node built-ins).
+      - run: docker compose up -d --build --wait
+      - run: npm run demo:concurrency
+      - run: npm run demo:concurrency -- --units 5
+      - name: API logs on failure
+        if: failure()
+        run: docker compose logs api
