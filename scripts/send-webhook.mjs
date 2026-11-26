@@ -41,7 +41,8 @@ const secrets = Object.fromEntries(
 const secret = secrets[args.channel];
 if (!secret) fail(`no secret configured for channel "${args.channel}"`);
 const times = Number(args.times);
-if (!Number.isInteger(times) || times < 1) fail('--times must be a positive integer');
+if (!Number.isInteger(times) || times < 1)
+  fail('--times must be a positive integer');
 
 let body;
 if (args.type === 'created') {
@@ -70,15 +71,28 @@ if (args.type === 'created') {
 const raw = JSON.stringify(body);
 const signature = `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
 
+// One X-Request-Id per delivery, so each one can be found in the API logs:
+//   docker compose logs api | grep '"requestId":"<id>"'
+// Kept within the API's accepted format ([A-Za-z0-9._-], max 64 chars).
+const requestIdBase = body.eventId
+  .replace(/[^A-Za-z0-9._-]/g, '_')
+  .slice(0, 50);
+
 async function send(i) {
+  const requestId = `wh-${requestIdBase}-${i + 1}`;
   const res = await fetch(`${apiUrl}/webhooks/channels/${args.channel}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-signature': signature },
+    headers: {
+      'content-type': 'application/json',
+      'x-signature': signature,
+      'x-request-id': requestId,
+    },
     body: raw,
   });
   const json = await res.json();
   return {
     delivery: i + 1,
+    requestId: res.headers.get('x-request-id') ?? requestId,
     http: res.status,
     status: json.status ?? '-',
     eventStatus: json.eventStatus ?? '-',
