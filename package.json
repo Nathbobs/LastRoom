@@ -21,7 +21,8 @@
     "test:int": "vitest run --config ./vitest.config.int.ts",
     "test:conc": "vitest run --config ./vitest.config.conc.ts",
     "webhook:send": "node scripts/send-webhook.mjs",
-    "test:smoke": "nest build && MONGO_URI=mongodb://smoke REDIS_URL=redis://smoke API_KEY=smoke-test-key-not-real node --input-type=module -e \"await import(\\\"./dist/app.module.js\\\"); console.log(\\\"smoke: compiled app module loads under Node ESM\\\")\""
+    "test:smoke": "nest build && MONGO_URI=mongodb://smoke REDIS_URL=redis://smoke API_KEY=smoke-test-key-not-real node --input-type=module -e \"await import(\\\"./dist/app.module.js\\\"); console.log(\\\"smoke: compiled app module loads under Node ESM\\\")\"",
+    "demo:concurrency": "node scripts/demo-concurrency.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
