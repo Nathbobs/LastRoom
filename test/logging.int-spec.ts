@@ -194,4 +194,46 @@ describe('Structured logs (integration)', () => {
     // The masked form is what support gets instead.
     expect(text).toContain('v***@example.com');
   });
+
+  it('traces a webhook delivery by requestId, with eventId and source', async () => {
+    const roomTypeId = await createRoomType();
+    const event = bookingEvent('evt_trace_1', roomTypeId);
+
+    const res = await webhook(event, 'trace-webhook-001').expect(200);
+    const reservationId = (res.body as { reservationId: string }).reservationId;
+    await logs.waitFor(completed('trace-webhook-001'));
+    const trace = logs.forRequest('trace-webhook-001');
+
+    expect(trace.map((l) => l.msg)).toEqual([
+      'channel event received',
+      'reservation created',
+      'channel event processed',
+      'request completed',
+    ]);
+    const ids = { source: 'channel-a', eventId: 'evt_trace_1' };
+    expect(trace[0]).toMatchObject({ ...ids, type: 'booking.created' });
+    expect(trace[1]).toMatchObject({
+      source: 'channel-a',
+      reservationId,
+      roomTypeId,
+    });
+    expect(trace[2]).toMatchObject({
+      ...ids,
+      reservationId,
+      roomTypeId,
+      attempt: 1,
+      alreadyApplied: false,
+    });
+    expect(trace[2].durationMs).toEqual(expect.any(Number));
+
+    // The redelivery is its own request, and its trace says "duplicate".
+    await webhook(event, 'trace-webhook-002').expect(200);
+    await logs.waitFor(completed('trace-webhook-002'));
+    expect(logs.forRequest('trace-webhook-002')[0]).toMatchObject({
+      msg: 'channel event duplicate',
+      ...ids,
+      eventStatus: 'PROCESSED',
+      reservationId,
+    });
+  });
 });
