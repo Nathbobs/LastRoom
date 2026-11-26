@@ -104,3 +104,27 @@ stops a double booking, and it still holds when Redis is down
 and still gets exactly one success). The Redis lock only reduces write conflicts
 under contention. Cancelling is the mirror image: one transaction that gives
 back every night and marks the reservation CANCELLED.
+
+## How a channel webhook works
+
+```mermaid
+flowchart TD
+  CH["Channel (mock)<br/>POST /webhooks/channels/:channel"] --> SIG{"HMAC-SHA256 of the raw body<br/>matches X-Signature?"}
+  SIG -- no --> E401["401 INVALID_SIGNATURE<br/>nothing stored"]
+  SIG -- yes --> INBOX["Insert into event inbox<br/>status RECEIVED"]
+  INBOX --> DUP{"Unique index<br/>(source, eventId)<br/>already has it?"}
+  DUP -- yes --> DUPR["200 duplicate<br/>with the original outcome"]
+  DUP -- no --> PROC["Process: same booking or cancel<br/>path as the operator API"]
+  PROC -- ok --> DONE["Mark PROCESSED<br/>200 processed"]
+  PROC -- "fails, e.g. night full" --> FAIL["Mark FAILED with error code<br/>200 failed, kept for review"]
+  DONE -.-> REC["Reconciliation job<br/>(planned, not built yet)"]
+  FAIL -.-> REC
+```
+
+The duplicate check is the unique `(source, eventId)` index in MongoDB, not an
+in-memory or Redis check, so it holds across restarts and parallel deliveries
+(`test/webhooks.conc-spec.ts` sends the same event 50 times in parallel and gets
+one reservation). Events that fail are answered 200 so the channel stops
+retrying, and they stay in the inbox as FAILED. The dashed reconciliation step,
+which would compare inventory with reservations and report failed or stuck
+events, is not built yet (see [What I'd do next](#limitations-and-what-id-do-next)).
