@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
@@ -146,7 +147,8 @@ describe('Structured logs (integration)', () => {
   it('never logs the API key, HMAC secret, signature, idempotency key or full guest email', async () => {
     const roomTypeId = await createRoomType(3);
     const email = 'very.private.guest@example.com';
-    const idempotencyKey = 'idem-key-should-not-be-logged-42';
+    // Unique per run: the Redis cache keeps keys for 24h across test runs.
+    const idempotencyKey = `idem-key-not-logged-${randomUUID()}`;
 
     await post('/reservations')
       .set('X-Request-Id', 'trace-secrets-api')
