@@ -8,3 +8,10 @@ coverage
 CLAUDE.md
 docs
 test
+scripts
+.github
+*.tsbuildinfo
+vitest.config*.ts
+.oxlintrc.json
+.prettierrc
+README.md
