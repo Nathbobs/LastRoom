@@ -77,3 +77,30 @@ booking: the same id for a different room type or dates is rejected as
 `INVALID_STATE`, on purpose (one channel booking is one reservation).
 
 Stop with `docker compose down` (add `-v` to delete the data).
+
+## How a booking works
+
+```mermaid
+flowchart TD
+  C["Operator client<br/>POST /reservations"] --> RID["Request id<br/>reuse safe X-Request-Id or new UUID"]
+  RID --> AUTH{"X-Api-Key valid?"}
+  AUTH -- no --> E401["401 UNAUTHORIZED"]
+  AUTH -- yes --> IDEM{"Idempotency-Key<br/>seen before?"}
+  IDEM -- "yes, same request" --> REPLAY["Return the original reservation<br/>Idempotent-Replayed: true"]
+  IDEM -- "no key / new key" --> LOCK["Redis lock per room type<br/>SET NX PX 5000"]
+  LOCK -. "Redis down or wait > 3 s:<br/>continue without the lock" .-> TX
+  LOCK --> TX["MongoDB transaction"]
+  TX --> CLAIM{"For each night:<br/>booked < total ?<br/>then booked + 1"}
+  CLAIM -- "any night full" --> ABORT["Abort: every claimed night rolled back<br/>409 ROOM_UNAVAILABLE"]
+  CLAIM -- "all nights claimed" --> INS["Insert reservation CONFIRMED<br/>in the same transaction"]
+  INS --> COMMIT["Commit, release lock<br/>201 Created"]
+  COMMIT --> LOG["JSON log line with requestId,<br/>reservationId, roomTypeId, lock, durationMs"]
+  ABORT --> LOG
+```
+
+MongoDB is the guarantee: the conditional `$inc` inside one transaction is what
+stops a double booking, and it still holds when Redis is down
+(`test/redis-down.conc-spec.ts` runs the 50-request race with Redis unreachable
+and still gets exactly one success). The Redis lock only reduces write conflicts
+under contention. Cancelling is the mirror image: one transaction that gives
+back every night and marks the reservation CANCELLED.
