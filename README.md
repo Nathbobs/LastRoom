@@ -6,15 +6,17 @@ Backend API for a small lodging operator: per-night room inventory,
 reservations that never double-book, and an idempotent webhook for booking
 channels.
 
+**Stack:**  ![Node.js 24](https://img.shields.io/badge/Node.js_24-5FA04E?logo=nodedotjs&logoColor=white) ![NestJS](https://img.shields.io/badge/NestJS-E0234E?logo=nestjs&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![MongoDB replica set](https://img.shields.io/badge/MongoDB_replica_set-47A248?logo=mongodb&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-FF4438?logo=redis&logoColor=white) ![Vitest and Supertest](https://img.shields.io/badge/Vitest_+_Supertest-6E9F18?logo=vitest&logoColor=white) ![pino](https://img.shields.io/badge/pino-687634?logo=pino&logoColor=white) ![Swagger](https://img.shields.io/badge/Swagger-85EA2D?logo=swagger&logoColor=black) ![Docker Compose](https://img.shields.io/badge/Docker_Compose-2496ED?logo=docker&logoColor=white) ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?logo=githubactions&logoColor=white)
+
 ## The problem
 
 A guesthouse has one room left for Christmas. A guest books it at the front
-desk at the same moment a booking channel sends a reservation for the same
+desk at the same moment as a booking channel, (i.e booking.com) sends a reservation for the same
 nights. If both requests read "1 available" before either writes, the room is
-sold twice. Channels also deliver the same event more than once (timeouts,
+sold twice. booking.com can also deliver the same event more than once (timeouts,
 retries), and every repeat can create another booking. LastRoom keeps
 availability per night in MongoDB and claims all nights of a stay in one
-transaction, so the last unit goes to exactly one request. Every channel event
+transaction, so the last unit goes to exactly one request. Every booking.com event
 is stored in an inbox with a unique key before it is processed, so a replayed
 event takes effect once.
 
@@ -52,6 +54,8 @@ replica set and Redis. The demo creates a room type with one unit, then fires
 PASS: 1 booking(s) succeeded for 1 unit(s), booked = 1 on every night, 698 ms for 50 requests
 ```
 
+![Concurrency demo: 50 parallel bookings, 1 succeeds, 49 rejected](docs/images/concurrency-demo.png)
+
 `npm run demo:concurrency -- --units 5` does the same with five units (5 x 201,
 45 x 409).
 
@@ -59,6 +63,10 @@ PASS: 1 booking(s) succeeded for 1 unit(s), booked = 1 on every night, 698 ms fo
 Click _Authorize_ and use the local development key
 `local-dev-api-key-change-me` (from `docker-compose.yml`; override it with
 `API_KEY=... docker compose up` anywhere that isn't your laptop).
+
+![Swagger UI at /docs listing all ten LastRoom endpoints, grouped into health, room-types, availability, reservations and channels](docs/images/swagger-ui.png)
+
+![Swagger UI with POST /reservations expanded: the two-night request body example, and the documented 409 ROOM_UNAVAILABLE error response with code, message, details and requestId](docs/images/swagger-reservation.png)
 
 ```sh
 KEY=local-dev-api-key-change-me
@@ -198,6 +206,8 @@ Integration and concurrency tests need `docker compose up -d mongo redis` and
 `npm install`. CI runs all of them plus the demo on a fresh stack on every push.
 [docs/testing.md](docs/testing.md) maps each requirement to the test that
 covers it.
+
+![CI run: lint, unit, integration, concurrency and fresh-stack jobs passing](docs/images/ci-green.png)
 
 ## Limitations and what I'd do next
 
