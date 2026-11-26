@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { signBody } from '../src/channels/channel-signature.guard.js';
+import { ReservationsService } from '../src/reservations/reservations.service.js';
 import {
   API_KEY,
   bookingEvent,
@@ -235,5 +236,45 @@ describe('Structured logs (integration)', () => {
       eventStatus: 'PROCESSED',
       reservationId,
     });
+  });
+
+  it('logs an unexpected error at error level with the requestId the client sees', async () => {
+    const roomTypeId = await createRoomType();
+    const spy = vi
+      .spyOn(app.get(ReservationsService), 'create')
+      .mockRejectedValueOnce(new Error('simulated driver failure'));
+    const requestId = 'trace-error-001';
+    try {
+      const res = await post('/reservations')
+        .set('X-Request-Id', requestId)
+        .send(stay(roomTypeId))
+        .expect(500);
+      // The client gets a generic message plus the id to report...
+      expect(res.body).toMatchObject({
+        error: { code: 'INTERNAL_ERROR', requestId },
+      });
+      expect(JSON.stringify(res.body)).not.toContain(
+        'simulated driver failure',
+      );
+    } finally {
+      spy.mockRestore();
+    }
+
+    // ...and that id finds the real error in the logs.
+    const done = await logs.waitFor(
+      (l) => l.requestId === requestId && l.msg === 'request failed',
+    );
+    expect(done).toMatchObject({ level: 50, res: { statusCode: 500 } });
+    const logged = logs
+      .forRequest(requestId)
+      .find((l) => l.msg === 'unhandled error');
+    expect(logged).toMatchObject({
+      level: 50,
+      context: 'AllExceptionsFilter',
+      method: 'POST',
+      path: '/reservations',
+      err: { type: 'Error', message: 'simulated driver failure' },
+    });
+    expect((logged?.err as { stack: string }).stack).toContain('Error:');
   });
 });
