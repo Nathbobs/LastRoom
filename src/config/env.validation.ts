@@ -60,10 +60,13 @@ export function validateEnv(raw: Record<string, unknown>): Env {
 
   const channelSecrets = parseChannelSecrets(raw.CHANNEL_SECRETS, errors);
 
+  const rawLevel = raw.LOG_LEVEL;
   const logLevel =
-    raw.LOG_LEVEL === undefined || raw.LOG_LEVEL === ''
+    rawLevel === undefined || rawLevel === ''
       ? 'info'
-      : String(raw.LOG_LEVEL);
+      : typeof rawLevel === 'string'
+        ? rawLevel
+        : '';
   if (!isLogLevel(logLevel)) {
     errors.push(`LOG_LEVEL must be one of: ${LOG_LEVELS.join(', ')}`);
   }

@@ -25,6 +25,12 @@ describe('validateEnv', () => {
     );
   });
 
+  it('rejects a non-string LOG_LEVEL', () => {
+    expect(() =>
+      validateEnv({ ...valid, LOG_LEVEL: { level: 'info' } }),
+    ).toThrow(/LOG_LEVEL must be one of/);
+  });
+
   it('rejects an unknown LOG_LEVEL', () => {
     expect(() => validateEnv({ ...valid, LOG_LEVEL: 'loud' })).toThrow(
       /LOG_LEVEL must be one of: fatal, error, warn, info, debug, trace, silent/,
