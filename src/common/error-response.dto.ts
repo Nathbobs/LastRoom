@@ -39,11 +39,14 @@ export class ErrorResponseDto {
   error: ErrorPayloadDto;
 }
 
-const DESCRIPTIONS: Record<number, string> = {
+const DESCRIPTIONS = {
   400: 'VALIDATION_ERROR: invalid body, query, id or date range',
   401: 'UNAUTHORIZED: missing or invalid X-Api-Key',
   404: 'NOT_FOUND: unknown id',
-};
+} as const;
+
+/** Statuses ApiErrors can document; 409 has per-endpoint cases (ApiConflict). */
+export type ErrorStatus = keyof typeof DESCRIPTIONS;
 
 /** Every response carries the request id; error bodies repeat it. */
 export const REQUEST_ID_RESPONSE_HEADER = {
@@ -58,7 +61,7 @@ export const REQUEST_ID_RESPONSE_HEADER = {
  * Real error bodies, captured from the running API, so the docs show exactly
  * what a client receives.
  */
-const EXAMPLES: Record<number, Record<string, ApiResponseExamples>> = {
+const EXAMPLES: Record<ErrorStatus, Record<string, ApiResponseExamples>> = {
   400: {
     invalidField: {
       summary: 'A field fails validation',
@@ -115,7 +118,7 @@ export function errorBody(
 
 /** Documents the given error statuses, with the shared shape and real examples. */
 export function ApiErrors(
-  ...statuses: (keyof typeof DESCRIPTIONS & number)[]
+  ...statuses: ErrorStatus[]
 ): MethodDecorator & ClassDecorator {
   return applyDecorators(
     ...statuses.map((status) =>
