@@ -11,6 +11,7 @@ import {
   Res,
 } from '@nestjs/common';
 import {
+  ApiBody,
   ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
@@ -19,7 +20,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { ApiConflict, ApiErrors } from '../common/error-response.dto.js';
+import {
+  ApiConflict,
+  ApiErrors,
+  REQUEST_ID_RESPONSE_HEADER,
+} from '../common/error-response.dto.js';
 import { ParseObjectIdPipe } from '../common/parse-object-id.pipe.js';
 import {
   CreateReservationDto,
@@ -48,9 +53,35 @@ export class ReservationsController {
     name: 'Idempotency-Key',
     required: false,
     description:
-      'Retries with the same key return the original response instead of booking twice.',
+      'Optional, 1-255 visible ASCII chars (e.g. a UUID). Retries with the same key return the original reservation instead of booking twice; kept for 24h in Redis and durably on the reservation.',
   })
-  @ApiCreatedResponse({ type: ReservationResponseDto })
+  @ApiBody({
+    type: CreateReservationDto,
+    examples: {
+      twoNights: {
+        summary: 'Two nights: books 12-24 and 12-25 (check-out day stays free)',
+        value: {
+          roomTypeId: '6b07c8c753db61eb67136efc',
+          checkIn: '2026-12-24',
+          checkOut: '2026-12-26',
+          guest: { name: 'Ada Lovelace', email: 'ada@example.com' },
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    type: ReservationResponseDto,
+    description:
+      'Booked. With an Idempotency-Key, a retry returns this same reservation (201) with Idempotent-Replayed: true.',
+    headers: {
+      ...REQUEST_ID_RESPONSE_HEADER,
+      'Idempotent-Replayed': {
+        description:
+          'Present ("true") only when this response replays an earlier request with the same Idempotency-Key.',
+        schema: { type: 'string', enum: ['true'] },
+      },
+    },
+  })
   @ApiErrors(400, 404)
   @ApiConflict('roomUnavailable', 'keyReused')
   async create(
