@@ -30,9 +30,11 @@ export function configureApp(app: INestApplication): void {
       .setTitle('LastRoom API')
       .setDescription(
         'Per-night room inventory and reservations that never double-book. ' +
-          'Errors always use { error: { code, message, details, requestId } }.',
+          'Operator endpoints need the X-Api-Key header; channel webhooks are signed with HMAC instead (X-Signature). ' +
+          'Errors always use { error: { code, message, details, requestId } }. ' +
+          'Every response carries X-Request-Id: send your own (1-64 chars of [A-Za-z0-9._-]) to trace a request in the logs.',
       )
-      .setVersion('0.5.0')
+      .setVersion('0.6.0')
       .addApiKey(
         { type: 'apiKey', in: 'header', name: API_KEY_HEADER },
         'api-key',
