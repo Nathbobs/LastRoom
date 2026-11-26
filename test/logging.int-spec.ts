@@ -275,6 +275,7 @@ describe('Structured logs (integration)', () => {
       path: '/reservations',
       err: { type: 'Error', message: 'simulated driver failure' },
     });
-    expect((logged?.err as { stack: string }).stack).toContain('Error:');
+    const err = logged?.err as { stack?: string } | undefined;
+    expect(err?.stack).toContain('Error:');
   });
 });
