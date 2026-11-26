@@ -461,6 +461,103 @@ describe('Phase 2 API (integration)', () => {
       ]);
     });
 
+    // Narrow view of the OpenAPI JSON, enough for the checks below.
+    interface Op {
+      requestBody?: {
+        content: Record<string, { examples?: Record<string, unknown> }>;
+      };
+      responses: Record<
+        string,
+        {
+          headers?: Record<string, unknown>;
+          content?: Record<
+            string,
+            { examples?: Record<string, { value: unknown }> }
+          >;
+        }
+      >;
+    }
+    async function openApi(): Promise<Record<string, Record<string, Op>>> {
+      const res = await api().get('/docs-json').expect(200);
+      return (res.body as { paths: Record<string, Record<string, Op>> }).paths;
+    }
+    const examplesOf = (op: Op, status: string) =>
+      op.responses[status]?.content?.['application/json']?.examples ?? {};
+    const codesOf = (op: Op, status: string) =>
+      Object.values(examplesOf(op, status))
+        .map((e) => (e.value as { error: { code: string } }).error.code)
+        .sort();
+
+    it('the write endpoints have request body examples', async () => {
+      const paths = await openApi();
+      for (const [path, method] of [
+        ['/room-types', 'post'],
+        ['/room-types/{id}/inventory', 'put'],
+        ['/reservations', 'post'],
+        ['/webhooks/channels/{channel}', 'post'],
+      ]) {
+        const examples =
+          paths[path][method].requestBody?.content['application/json']
+            ?.examples;
+        expect(
+          Object.keys(examples ?? {}).length,
+          `${method} ${path}`,
+        ).toBeGreaterThan(0);
+      }
+    });
+
+    it('each endpoint documents its own 409 cases', async () => {
+      const paths = await openApi();
+      expect(codesOf(paths['/reservations'].post, '409')).toEqual([
+        'INVALID_STATE',
+        'ROOM_UNAVAILABLE',
+      ]);
+      expect(codesOf(paths['/reservations/{id}/cancel'].post, '409')).toEqual([
+        'INVALID_STATE',
+      ]);
+      expect(codesOf(paths['/room-types'].post, '409')).toEqual([
+        'INVALID_STATE',
+      ]);
+    });
+
+    it('documents X-Request-Id on errors and Idempotent-Replayed on create', async () => {
+      const paths = await openApi();
+      const create = paths['/reservations'].post;
+      expect(Object.keys(create.responses['201'].headers ?? {})).toEqual(
+        expect.arrayContaining(['X-Request-Id', 'Idempotent-Replayed']),
+      );
+      expect(create.responses['400'].headers).toHaveProperty('X-Request-Id');
+    });
+
+    it('documented 401 bodies match what the API really returns', async () => {
+      const paths = await openApi();
+      const withoutRequestId = (body: unknown) => {
+        const { error } = body as { error: Record<string, unknown> };
+        return { ...error, requestId: undefined };
+      };
+
+      const apiKeyExample = Object.values(
+        examplesOf(paths['/reservations'].post, '401'),
+      )[0].value;
+      const real = await api().post('/reservations').send({}).expect(401);
+      expect(withoutRequestId(real.body)).toEqual(
+        withoutRequestId(apiKeyExample),
+      );
+
+      // The webhook's 401 is INVALID_SIGNATURE, not the API-key one.
+      const sigExample = Object.values(
+        examplesOf(paths['/webhooks/channels/{channel}'].post, '401'),
+      )[0].value;
+      const realSig = await api()
+        .post('/webhooks/channels/channel-a')
+        .set('X-Signature', 'sha256=00')
+        .send({})
+        .expect(401);
+      expect(withoutRequestId(realSig.body)).toEqual(
+        withoutRequestId(sigExample),
+      );
+    });
+
     it('serves the Swagger UI at /docs', async () => {
       const res = await api().get('/docs').redirects(1).expect(200);
       expect(res.text).toContain('swagger');
